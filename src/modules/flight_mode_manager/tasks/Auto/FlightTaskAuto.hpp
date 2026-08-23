@@ -144,6 +144,9 @@ protected:
 	bool _is_emergency_braking_active{false};
 	bool _want_takeoff{false};
 
+	float _emergency_braking_best_speed{INFINITY}; /**< lowest speed seen while emergency braking */
+	hrt_abstime _emergency_braking_progress_timestamp{0}; /**< when that speed was last improved */
+
 	DEFINE_PARAMETERS_CUSTOM_PARENT(FlightTask,
 					(ParamFloat<px4::params::MPC_XY_CRUISE>) _param_mpc_xy_cruise,
 					(ParamFloat<px4::params::NAV_MC_ALT_RAD>)

@@ -180,6 +180,7 @@ bool FlightTaskAuto::update()
 	}
 
 	_checkEmergencyBraking();
+	_constraints.emergency_braking = _is_emergency_braking_active;
 	Vector3f waypoints[] = {_triplet_previous, _position_setpoint, _triplet_next};
 
 	if (isTargetModified()) {
@@ -193,9 +194,8 @@ bool FlightTaskAuto::update()
 	_updateTrajConstraints();
 
 	if (_is_emergency_braking_active) {
-		// Re-seed the trajectory to the measured state every cycle so controller saturation doesn't
-		// cause a velocity error inversion during emergency braking.
-		_position_smoothing.forceSetVelocity(_velocity);
+		// Keep the trajectory position on the vehicle so the position error doesn't get corrected at
+		// the expense of the braking feedforward.
 		_position_smoothing.forceSetPosition(_position);
 	}
 
@@ -723,13 +723,27 @@ void FlightTaskAuto::_checkEmergencyBraking()
 
 		if (is_vertical_speed_exceeded || is_horizontal_speed_exceeded) {
 			_is_emergency_braking_active = true;
+			_emergency_braking_best_speed = _velocity.norm();
+			_emergency_braking_progress_timestamp = _time_stamp_current;
 		}
 
 	} else {
 		// Deactivate emergency braking once slow enough for ordinary guidance to finish the stop.
-		// Must clear velocity estimate noise, otherwise braking latches and guidance never resumes.
-		if (math::isInRange(_position_smoothing.getCurrentVelocityZ(), -1.f, 1.f)
-		    && !_position_smoothing.getCurrentVelocityXY().longerThan(1.f)) {
+		const bool is_slow_enough = math::isInRange(_velocity(2), -1.f, 1.f)
+					    && !Vector2f(_velocity).longerThan(1.f);
+
+		// Hand back to ordinary guidance if the measured speed stops improving, otherwise an estimate
+		// biased above the release threshold would never let go.
+		const float speed = _velocity.norm();
+
+		if (speed < _emergency_braking_best_speed - 0.5f) {
+			_emergency_braking_best_speed = speed;
+			_emergency_braking_progress_timestamp = _time_stamp_current;
+		}
+
+		const bool is_not_braking = _time_stamp_current > _emergency_braking_progress_timestamp + 3_s;
+
+		if (is_slow_enough || is_not_braking) {
 			_is_emergency_braking_active = false;
 		}
 	}
