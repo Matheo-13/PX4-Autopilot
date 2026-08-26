@@ -610,6 +610,13 @@ private:
 		// control of airspeed fusion
 		(ParamExtFloat<px4::params::EKF2_ARSP_THR>)
 		_param_ekf2_arsp_thr, ///< A value of zero will disabled airspeed fusion. Any positive value sets the minimum airspeed which will be used (m/sec)
+		(ParamExtFloat<px4::params::EKF2_ARSP_RR_THR>)
+		_param_ekf2_arsp_rr_thr, ///< A value of zero will disable roll rate threshold. Any positive value sets the maximum roll rate at which the airspeed will be fused
+		(ParamExtFloat<px4::params::EKF2_ARSP_PR_THR>)
+		_param_ekf2_arsp_pr_thr, ///< A value of zero will disable pitch rate threshold. Any positive value sets the maximum pitch rate at which the airspeed will be fused
+		(ParamExtFloat<px4::params::EKF2_ARSP_YR_THR>)
+		_param_ekf2_arsp_yr_thr, ///< A value of zero will disable yaw rate threshold. Any positive value sets the maximum yaw rate at which the airspeed will be fused
+
 #endif // CONFIG_EKF2_AIRSPEED
 
 #if defined(CONFIG_EKF2_SIDESLIP)

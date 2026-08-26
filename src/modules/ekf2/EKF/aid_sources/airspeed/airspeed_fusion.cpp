@@ -95,11 +95,15 @@ void Ekf::controlAirDataFusion(const imuSample &imu_delayed)
 
 		updateAirspeed(airspeed_sample, _aid_src_airspeed);
 
-		const bool continuing_conditions_passing = _control_status.flags.in_air && (_control_status.flags.fixed_wing
-				|| _control_status.flags.in_transition)
-				&& !_control_status.flags.fake_pos;
+		const bool continuing_conditions_passing = _control_status.flags.in_air && !_control_status.flags.fake_pos;
 
-		const bool is_airspeed_significant = airspeed_sample.true_airspeed > _params.ekf2_arsp_thr;
+		const Vector3f body_rates = (imu_delayed.delta_ang / imu_delayed.delta_ang_dt) - _state.gyro_bias;
+
+		const bool angular_valid = (fabsf(body_rates(0)) < math::radians(_params.ekf2_arsp_rr_thr) || _params.ekf2_arsp_rr_thr < 0.0001f) && // Roll Rate
+					   (fabsf(body_rates(1)) < math::radians(_params.ekf2_arsp_pr_thr) || _params.ekf2_arsp_pr_thr < 0.0001f) && // Pitch Rate
+					   (fabsf(body_rates(2)) < math::radians(_params.ekf2_arsp_yr_thr) || _params.ekf2_arsp_yr_thr < 0.0001f);   // Yaw Rate
+
+		const bool is_airspeed_significant = airspeed_sample.true_airspeed > _params.ekf2_arsp_thr && angular_valid;
 		const bool is_airspeed_consistent = (_aid_src_airspeed.test_ratio > 0.f && _aid_src_airspeed.test_ratio < 1.f);
 		const bool starting_conditions_passing = continuing_conditions_passing
 				&& is_airspeed_significant

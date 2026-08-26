@@ -43,3 +43,36 @@ parameters:
       max: 5.0
       unit: m/s
       decimal: 1
+
+    EKF2_ARSP_RR_THR:
+      description:
+        short: Airspeed roll rate fusion threshold
+        long: Airspeed data is fused for wind estimation if roll rate is above this threshold.
+          Set to 0 to disable threshold.
+      type: float
+      default: 0.0
+      min: 0.0
+      unit: deg/s
+      decimal: 1
+
+    EKF2_ARSP_PR_THR:
+      description:
+        short: Airspeed pitch rate fusion threshold
+        long: Airspeed data is fused for wind estimation if pitch rate is above this threshold.
+          Set to 0 to disable threshold.
+      type: float
+      default: 0.0
+      min: 0.0
+      unit: deg/s
+      decimal: 1
+
+    EKF2_ARSP_YR_THR:
+      description:
+        short: Airspeed yaw rate fusion threshold
+        long: Airspeed data is fused for wind estimation if yaw rate is above this threshold.
+          Set to 0 to disable threshold.
+      type: float
+      default: 0.0
+      min: 0.0
+      unit: deg/s
+      decimal: 1
