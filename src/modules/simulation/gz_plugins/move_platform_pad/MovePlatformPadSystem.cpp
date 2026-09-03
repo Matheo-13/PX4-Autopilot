@@ -92,11 +92,10 @@ void MovePlatformPadSystem::Configure(
     this->link->setExtendedSysStateCb(std::bind(&MovePlatformPadSystem::subCbExtendedState, this, std::placeholders::_1));
     this->link->setHeartbeatCb(std::bind(&MovePlatformPadSystem::subCbState, this, std::placeholders::_1));
     this->link->setEventCb(std::bind(&MovePlatformPadSystem::subCbStatusEvent, this, std::placeholders::_1));
-    // TODO: wire subCbWaypointList() up to a MISSION_REQUEST_LIST /
-    // MISSION_ITEM_INT download once implemented (see mavlink_link.hpp).
+    this->link->setMissionListCb(std::bind(&MovePlatformPadSystem::subCbWaypointList, this, std::placeholders::_1));
     this->link->start();
 
-    gzmsg << "move_platform_pad_system configured for " << this->droneModelName
+    gzdbg << "move_platform_pad_system configured for " << this->droneModelName
           << ", MAVLink link on port " << localPort << std::endl;
 }
 
@@ -108,7 +107,7 @@ void MovePlatformPadSystem::subCbExtendedState(const mavlink_extended_sys_state_
     if (state_msg.landed_state == MAV_LANDED_STATE_LANDING && !this->landing
         && isRotaryWingState(state_msg.vtol_state))
     {
-        gzmsg << "Landing and MC detected." << std::endl;
+        gzdbg << "Landing and MC detected." << std::endl;
         this->landing = true;
 
         this->prepareForLanding();
@@ -122,7 +121,7 @@ void MovePlatformPadSystem::subCbExtendedState(const mavlink_extended_sys_state_
     // If the drone is about to drop and is in MC mode
     if (this->dropping && isRotaryWingState(state_msg.vtol_state))
     {
-        gzmsg << "Dropping and MC detected." << std::endl;
+        gzdbg << "Dropping and MC detected." << std::endl;
         this->dropping = false;
 
         this->prepareForDropping();
@@ -156,7 +155,7 @@ void MovePlatformPadSystem::subCbStatusEvent(const mavlink_event_t &msg)
 
         std::lock_guard<std::mutex> lock(this->stateMutex);
         this->rallyPointAlt = static_cast<double>(rallyPointAltInt);
-        gzmsg << "rallyPointAlt: " << this->rallyPointAlt << std::endl;
+        gzdbg << "rallyPointAlt: " << this->rallyPointAlt << std::endl;
     }
 }
 
@@ -171,16 +170,21 @@ void MovePlatformPadSystem::subCbWaypointList(const std::vector<mavlink_mission_
     std::lock_guard<std::mutex> lock(this->stateMutex);
     for (const auto &wpMsg : wpList)
     {
-        // land wp
-        if (wpMsg.command == MAV_CMD_NAV_LAND)
+        gzdbg << "Mission item seq=" << wpMsg.seq << " command=" << wpMsg.command
+              << " current=" << static_cast<int>(wpMsg.current) << " z=" << wpMsg.z << std::endl;
+
+        if (wpMsg.command == MAV_CMD_NAV_LAND || wpMsg.command == MAV_CMD_NAV_VTOL_LAND)
         {
             this->landingAlt = wpMsg.z;
+            gzdbg << "Updated landing alt : " << this->landingAlt << std::endl;
         }
         // drop wp
         else if (wpMsg.command == MAV_CMD_DO_CHANGE_ALTITUDE)
         {
             this->dropping = wpMsg.current != 0;
             this->dropAlt = wpMsg.z;
+
+            gzdbg << "Updated dropping alt to : "<< this->dropAlt << std::endl;
         }
     }
 }
@@ -214,7 +218,6 @@ void MovePlatformPadSystem::subCbModelStates(gz::sim::EntityComponentManager &ec
 
 void MovePlatformPadSystem::readEnvVariables()
 {
-    gzmsg << "Reading env vars" << std::endl;
     const char *droneModelNameEnv = std::getenv("PX4_SIM_MODEL");
     if (droneModelNameEnv == nullptr || std::string(droneModelNameEnv).empty()) {
         gzerr << "PX4_SIM_MODEL needs to be set, this plugin does not support attaching after simulation started" << std::endl;
@@ -228,7 +231,7 @@ void MovePlatformPadSystem::readEnvVariables()
 
     this->droneModelName = modelStr;
 
-    gzmsg << "Found PX4_SIM_MODEL: " << this->droneModelName << std::endl;
+    gzdbg << "Found PX4_SIM_MODEL: " << this->droneModelName << std::endl;
 
     const char *droneInitialPoseEnv = std::getenv("PX4_GZ_MODEL_POSE");
     if (droneInitialPoseEnv == nullptr || std::string(droneInitialPoseEnv).empty()) {
@@ -236,7 +239,7 @@ void MovePlatformPadSystem::readEnvVariables()
         return;
     }
 
-    gzmsg << "Found PX4_GZ_MODEL_POSE: " << droneInitialPoseEnv << std::endl;
+    gzdbg << "Found PX4_GZ_MODEL_POSE: " << droneInitialPoseEnv << std::endl;
 
     std::stringstream ss(droneInitialPoseEnv);
     std::string token;
@@ -331,7 +334,7 @@ void MovePlatformPadSystem::move_drone(gz::sim::EntityComponentManager &ecm)
     {
         gz::sim::Model(this->droneEntity).SetWorldPoseCmd(
             ecm, gz::math::Pose3d(x, y, z, 0, 0, 0));
-        gzmsg << "Drone moved successfully in Gazebo." << std::endl;
+        gzdbg << "Drone moved successfully in Gazebo." << std::endl;
     }
     else
     {
