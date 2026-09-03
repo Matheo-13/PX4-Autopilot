@@ -31,39 +31,34 @@
 #
 ############################################################################
 
-project(ArucoSystem)
-
-# Add external dependencies if needed
-# include(${CMAKE_CURRENT_SOURCE_DIR}/dependency.cmake)
-
-# Find required packages
-# find_package(PackageName REQUIRED)
+project(MovePlatformPadSystem)
 
 add_library(${PROJECT_NAME} SHARED
-    # Add your source files here
-    ArucoSystem.cpp
+    MovePlatformPadSystem.cpp
+    mavlink_link.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}
-    PUBLIC px4_gz_msgs
     PUBLIC ${GZ_SENSORS_TARGET}
     PUBLIC ${GZ_PLUGIN_TARGET}
     PUBLIC ${GZ_SIM_TARGET}
     PUBLIC ${GZ_TRANSPORT_TARGET}
-    # Add other dependencies as needed
-    # PUBLIC ${OtherLib_LIBS}
+    PRIVATE mavlink_c
 )
 
 target_include_directories(${PROJECT_NAME}
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PUBLIC ${CMAKE_CURRENT_BINARY_DIR}
-    PUBLIC px4_gz_msgs
-    # Add other include directories as needed
-    # PUBLIC ${OtherLib_INCLUDE_DIRS}
 )
 
-# Add dependencies if needed
-# add_dependencies(${PROJECT_NAME} ExternalDependency)
+if (NOT TARGET mavlink_c)
+    message(FATAL_ERROR
+        "MovePlatformPadSystem requires the 'mavlink_c' target from "
+        "src/modules/mavlink to be defined first. Make sure MAVLINK "
+        "support is enabled for this board config (CONFIG_MODULES_MAVLINK) "
+        "and that src/modules/mavlink is processed before this directory.")
+endif()
+add_dependencies(${PROJECT_NAME} mavlink_c_generate)
 
 if (NOT CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION lib/px4_gz_plugins)

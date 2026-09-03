@@ -3,7 +3,7 @@
  * Ported from move_platform_pad_node.cpp (Tiphaine CALVIER).
  */
 
-#include "move_platform_pad_system.hpp"
+#include "MovePlatformPadSystem.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -12,11 +12,14 @@
 #include <gz/sim/Model.hh>
 #include <gz/sim/Util.hh>
 #include <gz/sim/components/Name.hh>
+#include <gz/sim/components/ParentEntity.hh>
+#include <gz/sim/components/Geometry.hh>
 #include <gz/sim/components/Pose.hh>
 #include <gz/common/Console.hh>
 
-namespace move_platform_pad
-{
+#include <sdf/Box.hh>
+
+using namespace custom;
 
 // PX4 packs main_mode into byte 2 and sub_mode into byte 3 of
 // HEARTBEAT.custom_mode (see px4_custom_mode.h). This reproduces the
@@ -206,16 +209,29 @@ void MovePlatformPadSystem::subCbModelStates(gz::sim::EntityComponentManager &ec
 
 void MovePlatformPadSystem::readEnvVariables()
 {
+    gzmsg << "Reading env vars" << std::endl;
     const char *droneModelNameEnv = std::getenv("PX4_SIM_MODEL");
     if (droneModelNameEnv == nullptr || std::string(droneModelNameEnv).empty()) {
         gzerr << "PX4_SIM_MODEL needs to be set, this plugin does not support attaching after simulation started" << std::endl;
         throw;
     }
 
+    std::string modelStr(droneModelNameEnv);
+    if (modelStr.rfind("gz_", 0) == 0) {
+        modelStr = modelStr.substr(3);
+    }
+
+    this->droneModelName = modelStr;
+
+    gzmsg << "Found PX4_SIM_MODEL: " << this->droneModelName << std::endl;
+
     const char *droneInitialPoseEnv = std::getenv("PX4_GZ_MODEL_POSE");
     if (droneInitialPoseEnv == nullptr || std::string(droneInitialPoseEnv).empty()) {
+        gzmsg << "PX4_GZ_MODEL_POSE needs to be set, this plugin does not support attaching after simulation started" << std::endl;
         return;
     }
+
+    gzmsg << "Found PX4_GZ_MODEL_POSE: " << droneInitialPoseEnv << std::endl;
 
     std::stringstream ss(droneInitialPoseEnv);
     std::string token;
@@ -304,8 +320,8 @@ void MovePlatformPadSystem::move_drone(gz::sim::EntityComponentManager &ecm)
 
     if (this->droneEntity != gz::sim::kNullEntity)
     {
-        ecm.SetComponentData<gz::sim::components::Pose>(
-            this->droneEntity, gz::math::Pose3d(x, y, z, 0, 0, 0));
+        gz::sim::Model(this->droneEntity).SetWorldPoseCmd(
+            ecm, gz::math::Pose3d(x, y, z, 0, 0, 0));
         gzmsg << "Drone moved successfully in Gazebo." << std::endl;
     }
     else
@@ -318,7 +334,7 @@ void MovePlatformPadSystem::move_drone(gz::sim::EntityComponentManager &ecm)
 void MovePlatformPadSystem::prepareForDropping() const
 {
     double zDrop = this->dropAlt;
-    if (zDrop == 0.0)
+    if (std::abs(zDrop) < 1e-6)
     {
         gzerr << "dropAlt is 0.0 as if OC did not received the padAltAmsl. Moving the platform 15 m under the drone." << std::endl;
         zDrop = this->gazeboDronePosZ - 15.0;  // -15.0m because with a drop, the approach altitude is close to the pad
@@ -334,6 +350,8 @@ void MovePlatformPadSystem::prepareForDropping() const
 
 void MovePlatformPadSystem::prepareForLanding() const
 {
+
+    gzmsg << "Prepare for landing" << this->droneMode << std::endl;
     // Depending on the autoMode, select the altitude.
     double zAltitude = 0.0;
     if (this->droneMode == "AUTO.MISSION")
@@ -366,9 +384,9 @@ void MovePlatformPadSystem::prepareForLanding() const
 bool MovePlatformPadSystem::isPlatformBelow(const double x, const double y) const
 {
     // Check if there is a platform below the drone to not move higher a platform, mainly if there is a emergency landing above takeoff position.
-    return (std::abs(this->gazeboPlatformX - x) <= kPlatformLengthM/2) &&
-           (std::abs(this->gazeboPlatformY - y) <= kPlatformWidthM/2) &&
-           (this->gazeboPlatformZ + kPlatformHeightM/2 <= this->gazeboDronePosZ);
+    return (std::abs(this->gazeboPlatformX - x) <= PlatformLengthM/2) &&
+           (std::abs(this->gazeboPlatformY - y) <= PlatformWidthM/2) &&
+           (this->gazeboPlatformZ + PlatformHeightM/2 <= this->gazeboDronePosZ);
 }
 
 void MovePlatformPadSystem::movePlatformPad(const double x, const double y, const double z) const
@@ -397,9 +415,11 @@ void MovePlatformPadSystem::applyPendingMove(gz::sim::EntityComponentManager &ec
     double x, y, zPlatform;
     {
         std::lock_guard<std::mutex> lock(this->stateMutex);
-        x = this->reqX + distr(this->rng) * add_randomness * (this->kPlatformLengthM / 4);
-        y = this->reqY + distr(this->rng) * add_randomness * (this->kPlatformWidthM / 4);
-        zPlatform = this->reqZ - kPlatformHeightM / 2;
+        const double jitterX = add_randomness ? distr(this->rng) * (this->PlatformLengthM / 4) : 0.0;
+        const double jitterY = add_randomness ? distr(this->rng) * (this->PlatformWidthM / 4) : 0.0;
+        x = this->reqX + jitterX;
+        y = this->reqY + jitterY;
+        zPlatform = this->reqZ - PlatformHeightM / 2;
 
         if (this->platformEntity != gz::sim::kNullEntity)
         {
@@ -411,8 +431,8 @@ void MovePlatformPadSystem::applyPendingMove(gz::sim::EntityComponentManager &ec
 
     if (this->platformEntity != gz::sim::kNullEntity)
     {
-        ecm.SetComponentData<gz::sim::components::Pose>(
-            this->platformEntity, gz::math::Pose3d(x, y, zPlatform, 0, 0, 0));
+         gz::sim::Model(this->platformEntity).SetWorldPoseCmd(
+            ecm, gz::math::Pose3d(x, y, zPlatform, 0, 0, 0));
         gzmsg << "Platform moved successfully in Gazebo." << std::endl;
     }
     else
@@ -427,6 +447,7 @@ void MovePlatformPadSystem::PreUpdate(
     gz::sim::EntityComponentManager &ecm)
 {
     if (!configured) {
+        readEnvVariables();
         configureEntities(ecm);
         return;
     }
@@ -434,10 +455,8 @@ void MovePlatformPadSystem::PreUpdate(
     this->applyPendingMove(ecm);
 }
 
-}  // namespace move_platform_pad
-
 GZ_ADD_PLUGIN(
-    move_platform_pad::MovePlatformPadSystem,
+    custom::MovePlatformPadSystem,
     gz::sim::System,
-    move_platform_pad::MovePlatformPadSystem::ISystemConfigure,
-    move_platform_pad::MovePlatformPadSystem::ISystemPreUpdate)
+    custom::MovePlatformPadSystem::ISystemConfigure,
+    custom::MovePlatformPadSystem::ISystemPreUpdate)

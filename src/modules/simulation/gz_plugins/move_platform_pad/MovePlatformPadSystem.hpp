@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-namespace move_platform_pad
+namespace custom
 {
 
 
@@ -134,13 +134,13 @@ private:
     mutable double reqX{0.0}, reqY{0.0}, reqZ{0.0};
 
     // Platform dimensions, taken from platform/model.sdf
-    float PlatformLengthM = 0.0f;
-    float PlatformWidthM = 0.0f;
-    float PlatformHeightM = 0.0f;
+    double PlatformLengthM = 0.0f;
+    double PlatformWidthM = 0.0f;
+    double PlatformHeightM = 0.0f;
     static constexpr uint32_t kSmartSrpClosestRpEventId = 7944843;
     static constexpr uint32_t kSmartSrpNoClosestRpEventId = 5280179;
 };
 
-}  // namespace move_platform_pad
+}  // namespace custom
 
 #endif  // MOVE_PLATFORM_PAD_SYSTEM_HPP

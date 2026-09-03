@@ -6,9 +6,9 @@
 #include <string>
 #include <thread>
 
-#include <common/mavlink.h>
+#include <mavlink.h>
 
-namespace move_platform_pad
+namespace custom
 {
 
 class MavlinkLink
@@ -29,11 +29,11 @@ public:
     void start();
     void stop();
 
-    void setExtendedSysStateCb(ExtendedSysStateCb cb) { this->onExtendedSysState = std::move(cb); }
-    void setHeartbeatCb(HeartbeatCb cb) { this->onHeartbeat = std::move(cb); }
-    void setLocalPositionCb(LocalPositionCb cb) { this->onLocalPosition = std::move(cb); }
-    void setPositionTargetCb(PositionTargetCb cb) { this->onPositionTarget = std::move(cb); }
-    void setEventCb(EventCb cb) { this->onEvent = std::move(cb); }
+    void setExtendedSysStateCb(ExtendedSysStateCb cb) { this->_onExtendedSysState = std::move(cb); }
+    void setHeartbeatCb(HeartbeatCb cb) { this->_onHeartbeat = std::move(cb); }
+    void setLocalPositionCb(LocalPositionCb cb) { this->_onLocalPosition = std::move(cb); }
+    void setPositionTargetCb(PositionTargetCb cb) { this->_onPositionTarget = std::move(cb); }
+    void setEventCb(EventCb cb) { this->_onEvent = std::move(cb); }
 
     // Ask PX4 to stream a message at a given rate (Hz). Needed for
     // POSITION_TARGET_LOCAL_NED, which isn't always streamed by default.
@@ -41,25 +41,28 @@ public:
 
 private:
     void recvLoop();
+    void heartbeatLoop();
     void handleMessage(const mavlink_message_t &msg);
+    void sendHeartbeat();
 
     int sockFd{-1};
-    uint16_t localPort;
-    std::string px4Ip;
-    uint16_t px4Port;
+    uint16_t _localPort;
+    std::string _px4Ip;
+    uint16_t _px4Port;
 
-    uint8_t targetSysId{1};
-    uint8_t targetCompId{1};
-    bool haveTarget{false};
+    uint8_t _targetSysId{1};
+    uint8_t _targetCompId{1};
+    bool _haveTarget{false};
 
-    std::atomic<bool> running{false};
-    std::thread rxThread;
+    std::atomic<bool> _running{false};
+    std::thread _rxThread;
+    std::thread txHeartbeatThread;
 
-    ExtendedSysStateCb onExtendedSysState;
-    HeartbeatCb onHeartbeat;
-    LocalPositionCb onLocalPosition;
-    PositionTargetCb onPositionTarget;
-    EventCb onEvent;
+    ExtendedSysStateCb _onExtendedSysState;
+    HeartbeatCb _onHeartbeat;
+    LocalPositionCb _onLocalPosition;
+    PositionTargetCb _onPositionTarget;
+    EventCb _onEvent;
 };
 
 }  // namespace move_platform_pad
