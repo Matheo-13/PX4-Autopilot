@@ -40,6 +40,11 @@ std::string decodePx4ModeString(uint32_t customMode)
     return "OTHER";
 }
 
+bool isRotaryWingState(uint8_t vtolState)
+{
+    return vtolState == MAV_VTOL_STATE_MC || vtolState == MAV_VTOL_STATE_UNDEFINED;
+}
+
 gz::sim::Entity resolveEntityByName(gz::sim::EntityComponentManager &ecm, const std::string &name)
 {
     gz::sim::Entity found{gz::sim::kNullEntity};
@@ -101,7 +106,7 @@ void MovePlatformPadSystem::subCbExtendedState(const mavlink_extended_sys_state_
 
     // If the drone is about to land and is in MC mode
     if (state_msg.landed_state == MAV_LANDED_STATE_LANDING && !this->landing
-        && state_msg.vtol_state == MAV_VTOL_STATE_MC)
+        && isRotaryWingState(state_msg.vtol_state))
     {
         gzmsg << "Landing and MC detected." << std::endl;
         this->landing = true;
@@ -115,7 +120,7 @@ void MovePlatformPadSystem::subCbExtendedState(const mavlink_extended_sys_state_
     }
 
     // If the drone is about to drop and is in MC mode
-    if (this->dropping && state_msg.vtol_state == MAV_VTOL_STATE_MC)
+    if (this->dropping && isRotaryWingState(state_msg.vtol_state))
     {
         gzmsg << "Dropping and MC detected." << std::endl;
         this->dropping = false;
@@ -300,9 +305,13 @@ void MovePlatformPadSystem::configureEntities(gz::sim::EntityComponentManager &e
         return;
     }
 
-    this->reqX = droneInitialPose.x;
-    this->reqY = droneInitialPose.y;
-    this->reqZ = droneInitialPose.z;
+    {
+        std::lock_guard<std::mutex> lock(this->stateMutex);
+        this->reqX = droneInitialPose.x;
+        this->reqY = droneInitialPose.y;
+        this->reqZ = droneInitialPose.z;
+    }
+    this->moveRequested = true;
 
     this->applyPendingMove(ecm, false);
     this->move_drone(ecm);
@@ -415,8 +424,8 @@ void MovePlatformPadSystem::applyPendingMove(gz::sim::EntityComponentManager &ec
     double x, y, zPlatform;
     {
         std::lock_guard<std::mutex> lock(this->stateMutex);
-        const double jitterX = add_randomness ? distr(this->rng) * (this->PlatformLengthM / 4) : 0.0;
-        const double jitterY = add_randomness ? distr(this->rng) * (this->PlatformWidthM / 4) : 0.0;
+        const double jitterX = add_randomness ? distr(this->rng) * (this->PlatformLengthM / 8) : 0.0;
+        const double jitterY = add_randomness ? distr(this->rng) * (this->PlatformWidthM / 8) : 0.0;
         x = this->reqX + jitterX;
         y = this->reqY + jitterY;
         zPlatform = this->reqZ - PlatformHeightM / 2;

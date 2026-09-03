@@ -65,4 +65,4 @@ private:
     EventCb _onEvent;
 };
 
-}  // namespace move_platform_pad
+}  // namespace custom
