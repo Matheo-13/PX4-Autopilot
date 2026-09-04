@@ -324,7 +324,8 @@ void MovePlatformPadSystem::configureEntities(gz::sim::EntityComponentManager &e
 	this->moveRequested = true;
 
 	this->applyPendingMove(ecm, false);
-	if (!this->move_drone(ecm)) return;
+
+	if (!this->move_drone(ecm)) { return; }
 
 	this->configured = true;
 

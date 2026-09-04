@@ -196,6 +196,7 @@ void MavlinkLink::heartbeatLoop()
 
 	while (this->_running) {
 		this->sendHeartbeat();
+
 		if (this->_haveTarget && (++tick % kMissionRepollEveryTicks == 0)) {
 			this->requestMissionList();
 		}
