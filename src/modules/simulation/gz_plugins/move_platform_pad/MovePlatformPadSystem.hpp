@@ -40,7 +40,7 @@ class MovePlatformPadSystem :
 {
 public:
 	MovePlatformPadSystem() = default;
-	~MovePlatformPadSystem() override;
+	~MovePlatformPadSystem() override = default;
 
 	/**
 	 * @brief Gazebo System entry point.
@@ -57,7 +57,6 @@ public:
 		       gz::sim::EntityComponentManager &ecm) override;
 
 private:
-	// --- interface: was 5 mavros/gazebo subscriptions + 1 service client ---
 	std::unique_ptr<MavlinkLink> link;
 	gz::sim::Entity droneEntity{gz::sim::kNullEntity};
 	gz::sim::Entity platformEntity{gz::sim::kNullEntity};
@@ -87,7 +86,7 @@ private:
 	void configureEntities(gz::sim::EntityComponentManager &ecm);
 
 	/** @brief Move drone to desired position */
-	void move_drone(gz::sim::EntityComponentManager &ecm);
+	bool move_drone(gz::sim::EntityComponentManager &ecm);
 
 	/** @brief Function to prepare the drop */
 	void prepareForDropping() const;
@@ -95,14 +94,14 @@ private:
 	/** @brief Function to prepare the land */
 	void prepareForLanding() const;
 
-	/** @brief Function to check if there is a platform near this pose and below the drone */
+	/** @brief Function to check if there is a platform near this pose and below the drone.*/
 	bool isPlatformBelow(const double x, const double y) const;
 
-	/** @brief Function to move the plaftorm (and the pad) */
+	/** @brief Function to move the plaftorm (and the pad).
+	 * Caller must hold stateMutex. */
 	void movePlatformPad(const double x, const double y, const double z) const;
 
-	/** @brief Writes a move staged by movePlatformPad() into the ECM.
-	 * Only ever called from PreUpdate, on the sim thread. */
+	/** @brief Writes a move staged by movePlatformPad() into the ECM */
 	void applyPendingMove(gz::sim::EntityComponentManager &ecm, bool add_randomness = true);
 
 	// variables
@@ -133,7 +132,6 @@ private:
 	mutable std::atomic<bool> moveRequested{false};
 	mutable double reqX{0.0}, reqY{0.0}, reqZ{0.0};
 
-	// Platform dimensions, taken from platform/model.sdf
 	double PlatformLengthM = 0.0f;
 	double PlatformWidthM = 0.0f;
 	double PlatformHeightM = 0.0f;

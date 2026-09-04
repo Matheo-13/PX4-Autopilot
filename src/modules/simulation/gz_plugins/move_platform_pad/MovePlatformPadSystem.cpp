@@ -7,6 +7,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
+#include <chrono>
 
 #include <gz/plugin/Register.hh>
 #include <gz/sim/Model.hh>
@@ -21,10 +23,6 @@
 
 using namespace custom;
 
-// PX4 packs main_mode into byte 2 and sub_mode into byte 3 of
-// HEARTBEAT.custom_mode (see px4_custom_mode.h). This reproduces the
-// same strings mavros_msgs::msg::State::mode used to carry, so
-// prepareForLanding()'s string comparisons don't need to change.
 namespace
 {
 std::string decodePx4ModeString(uint32_t customMode)
@@ -63,27 +61,18 @@ gz::sim::Entity resolveEntityByName(gz::sim::EntityComponentManager &ecm, const 
 }
 }  // namespace
 
-MovePlatformPadSystem::~MovePlatformPadSystem()
-{
-	if (this->link) {
-		this->link->stop();
-	}
-}
-
 void MovePlatformPadSystem::Configure(
 	const gz::sim::Entity & /*entity*/,
 	const std::shared_ptr<const sdf::Element> &sdf,
 	gz::sim::EntityComponentManager &ecm,
 	gz::sim::EventManager & /*eventMgr*/)
 {
-	// Random generator used to shift the location of the platform
 	std::random_device rd;
 	this->rng = std::mt19937(rd());
 
 	this->readEnvVariables();
 	this->configureEntities(ecm);
 
-	// --- Interface: was 5 mavros/gazebo subscriptions + 1 service client ---
 	const uint16_t localPort = sdf->Get<int>("local_port", 14541).first;
 	const std::string px4Ip = sdf->Get<std::string>("px4_ip", "127.0.0.1").first;
 	const uint16_t px4Port = sdf->Get<int>("px4_port", 14580).first;
@@ -93,7 +82,10 @@ void MovePlatformPadSystem::Configure(
 	this->link->setHeartbeatCb(std::bind(&MovePlatformPadSystem::subCbState, this, std::placeholders::_1));
 	this->link->setEventCb(std::bind(&MovePlatformPadSystem::subCbStatusEvent, this, std::placeholders::_1));
 	this->link->setMissionListCb(std::bind(&MovePlatformPadSystem::subCbWaypointList, this, std::placeholders::_1));
-	this->link->start();
+
+	if (!this->link->start()) {
+		gzerr << "move_platform_pad_system: failed to start MAVLink link on port " << std::to_string(localPort) << std::endl;
+	}
 
 	gzdbg << "move_platform_pad_system configured for " << this->droneModelName
 	      << ", MAVLink link on port " << localPort << std::endl;
@@ -158,12 +150,12 @@ void MovePlatformPadSystem::subCbStatusEvent(const mavlink_event_t &msg)
 
 void MovePlatformPadSystem::subCbWaypointList(const std::vector<mavlink_mission_item_int_t> &wpList)
 {
+	std::lock_guard<std::mutex> lock(this->stateMutex);
+
 	if (wpList.empty()) {
-		gzerr << "Received null or empty waypoint list. Waiting for mission to be uploaded." << std::endl;
+		gzdbg << "PX4 mission is empty; landing/drop altitudes left unchanged." << std::endl;
 		return;
 	}
-
-	std::lock_guard<std::mutex> lock(this->stateMutex);
 
 	for (const auto &wpMsg : wpList) {
 		gzdbg << "Mission item seq=" << wpMsg.seq << " command=" << wpMsg.command
@@ -213,7 +205,7 @@ void MovePlatformPadSystem::readEnvVariables()
 
 	if (droneModelNameEnv == nullptr || std::string(droneModelNameEnv).empty()) {
 		gzerr << "PX4_SIM_MODEL needs to be set, this plugin does not support attaching after simulation started" << std::endl;
-		throw;
+		return;
 	}
 
 	std::string modelStr(droneModelNameEnv);
@@ -229,7 +221,7 @@ void MovePlatformPadSystem::readEnvVariables()
 	const char *droneInitialPoseEnv = std::getenv("PX4_GZ_MODEL_POSE");
 
 	if (droneInitialPoseEnv == nullptr || std::string(droneInitialPoseEnv).empty()) {
-		gzmsg << "PX4_GZ_MODEL_POSE needs to be set, this plugin does not support attaching after simulation started" << std::endl;
+		gzerr << "PX4_GZ_MODEL_POSE needs to be set, this plugin does not support attaching after simulation started" << std::endl;
 		return;
 	}
 
@@ -263,17 +255,28 @@ void MovePlatformPadSystem::readEnvVariables()
 void MovePlatformPadSystem::configureEntities(gz::sim::EntityComponentManager &ecm)
 {
 	this->platformEntity = resolveEntityByName(ecm, "platform");
-	this->droneEntity = resolveEntityByName(ecm, droneModelName);
+	this->droneEntity = resolveEntityByName(ecm, this->droneModelName);
 
 	if (this->platformEntity == gz::sim::kNullEntity) {
 		gzerr << "You need to have a platform model named 'platform' to use this plugin" << std::endl;
 		return;
 	}
 
+	gzdbg << "Platform entity exists" << std::endl;
+
 	if (this->droneEntity == gz::sim::kNullEntity) {
-		gzwarn << "Entity not spawned yet or name is wrong" << std::endl;
+		static auto last_log_time = std::chrono::steady_clock::now();
+		auto now = std::chrono::steady_clock::now();
+
+		if (std::chrono::duration_cast<std::chrono::seconds>(now - last_log_time).count() >= 1) {
+			gzerr << "Entity not spawned yet or name is wrong : " << this->droneModelName << "\n";
+			last_log_time = now;
+		}
+
 		return;
 	}
+
+	gzdbg << "Drone entity exists" << std::endl;
 
 	auto links = ecm.EntitiesByComponents(gz::sim::components::ParentEntity(this->platformEntity));
 	bool boxFound = false;
@@ -321,13 +324,13 @@ void MovePlatformPadSystem::configureEntities(gz::sim::EntityComponentManager &e
 	this->moveRequested = true;
 
 	this->applyPendingMove(ecm, false);
-	this->move_drone(ecm);
+	if (!this->move_drone(ecm)) return;
 
 	this->configured = true;
 
 }
 
-void MovePlatformPadSystem::move_drone(gz::sim::EntityComponentManager &ecm)
+bool MovePlatformPadSystem::move_drone(gz::sim::EntityComponentManager &ecm)
 {
 
 	const double x = droneInitialPose.x;
@@ -338,9 +341,11 @@ void MovePlatformPadSystem::move_drone(gz::sim::EntityComponentManager &ecm)
 		gz::sim::Model(this->droneEntity).SetWorldPoseCmd(
 			ecm, gz::math::Pose3d(x, y, z, 0, 0, 0));
 		gzdbg << "Drone moved successfully in Gazebo." << std::endl;
+		return true;
 
 	} else {
 		gzerr << "Failed to move drone." << std::endl;
+		return false;
 	}
 
 }
@@ -440,7 +445,7 @@ void MovePlatformPadSystem::applyPendingMove(gz::sim::EntityComponentManager &ec
 	if (this->platformEntity != gz::sim::kNullEntity) {
 		gz::sim::Model(this->platformEntity).SetWorldPoseCmd(
 			ecm, gz::math::Pose3d(x, y, zPlatform, 0, 0, 0));
-		gzmsg << "Platform moved successfully in Gazebo." << std::endl;
+		gzdbg << "Platform moved successfully in Gazebo." << std::endl;
 
 	} else {
 		gzerr << "Failed to move platform." << std::endl;

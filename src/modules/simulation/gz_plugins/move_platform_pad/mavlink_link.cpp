@@ -1,6 +1,7 @@
 #include "mavlink_link.hpp"
 
 #include <arpa/inet.h>
+#include <cerrno>
 #include <cstring>
 #include <iostream>
 #include <sys/socket.h>
@@ -10,10 +11,6 @@ using namespace custom;
 
 namespace
 {
-// How often (in heartbeat-loop ticks, i.e. roughly seconds) we re-request
-// the mission list, so that a newly uploaded mission is picked up without
-// needing to snoop on the GCS<->PX4 upload handshake (whose MISSION_ACK is
-// addressed to the uploader, not to us).
 constexpr int kMissionRepollEveryTicks = 5;
 }  // namespace
 
@@ -27,21 +24,32 @@ MavlinkLink::~MavlinkLink()
 	this->stop();
 }
 
-void MavlinkLink::start()
+bool MavlinkLink::start()
 {
 	this->sockFd = socket(AF_INET, SOCK_DGRAM, 0);
-	// TODO: check sockFd >= 0, handle error
+
+	if (this->sockFd < 0) {
+		std::cerr << "[MavlinkLink] Failed to create socket: " << strerror(errno) << std::endl;
+		return false;
+	}
 
 	sockaddr_in localAddr{};
 	localAddr.sin_family = AF_INET;
 	localAddr.sin_addr.s_addr = INADDR_ANY;
 	localAddr.sin_port = htons(this->_localPort);
-	bind(this->sockFd, reinterpret_cast<sockaddr *>(&localAddr), sizeof(localAddr));
-	// TODO: check bind() return value
+
+	if (bind(this->sockFd, reinterpret_cast<sockaddr *>(&localAddr), sizeof(localAddr)) < 0) {
+		std::cerr << "[MavlinkLink] Failed to bind to port " << this->_localPort << ": "
+			  << strerror(errno) << std::endl;
+		close(this->sockFd);
+		this->sockFd = -1;
+		return false;
+	}
 
 	this->_running = true;
 	this->_rxThread = std::thread(&MavlinkLink::recvLoop, this);
 	this->txHeartbeatThread = std::thread(&MavlinkLink::heartbeatLoop, this);
+	return true;
 }
 
 void MavlinkLink::stop()
@@ -61,7 +69,6 @@ void MavlinkLink::stop()
 	if (this->txHeartbeatThread.joinable()) {
 		this->txHeartbeatThread.join();
 	}
-
 }
 
 void MavlinkLink::recvLoop()
@@ -74,11 +81,13 @@ void MavlinkLink::recvLoop()
 	socklen_t srcLen = sizeof(srcAddr);
 
 	while (this->_running) {
+		// TODO: distinguish a real recv error from EINTR/timeout instead of
+		// just retrying either way.
 		const ssize_t n = recvfrom(this->sockFd, buffer, sizeof(buffer), 0,
 					   reinterpret_cast<sockaddr *>(&srcAddr), &srcLen);
 
 		if (n <= 0) {
-			continue;  // TODO: distinguish timeout/EINTR vs real errors
+			continue;
 		}
 
 		for (ssize_t i = 0; i < n; ++i) {
@@ -95,14 +104,6 @@ void MavlinkLink::handleMessage(const mavlink_message_t &msg)
 		mavlink_heartbeat_t hb;
 		mavlink_msg_heartbeat_decode(&msg, &hb);
 
-		// Only treat this as PX4's heartbeat -- and learn it as our target --
-		// if it's genuinely from the autopilot component with a real
-		// autopilot type set. Companion-computer / GCS heartbeats (including
-		// our own, which can loop back depending on the link/router setup)
-		// report component_id != MAV_COMP_ID_AUTOPILOT1 and
-		// autopilot == MAV_AUTOPILOT_INVALID by convention -- exactly what
-		// sendHeartbeat() below sets for our own packet -- so this filters
-		// those out instead of accidentally addressing ourselves.
 		const bool isAutopilotHeartbeat =
 			msg.compid == MAV_COMP_ID_AUTOPILOT1 && hb.autopilot != MAV_AUTOPILOT_INVALID;
 
@@ -119,8 +120,6 @@ void MavlinkLink::handleMessage(const mavlink_message_t &msg)
 				  << static_cast<int>(msg.sysid) << " compid="
 				  << static_cast<int>(msg.compid) << std::endl;
 
-			// We now know who to ask -- pull whatever mission is currently on
-			// PX4 (e.g. one uploaded before this plugin started).
 			this->requestMissionList();
 		}
 
@@ -193,20 +192,10 @@ void MavlinkLink::handleMessage(const mavlink_message_t &msg)
 
 void MavlinkLink::heartbeatLoop()
 {
-	// PX4's onboard MAVLink instance will not send anything to us -- not
-	// even a heartbeat -- until it has first RECEIVED a packet from us
-	// (see mavlink_receiver.cpp: "only start accepting messages on UDP
-	// once we're sure who we talk to"). So this has to run unconditionally
-	// from the start, not just after we already have a target.
 	int tick = 0;
 
 	while (this->_running) {
 		this->sendHeartbeat();
-
-		// Periodically re-pull the mission list so that a mission uploaded
-		// by a GCS *after* this link connected still updates landingAlt /
-		// dropAlt. We can't just watch for the GCS's own MISSION_ACK, since
-		// that's addressed to the uploader's sysid/compid, not to us.
 		if (this->_haveTarget && (++tick % kMissionRepollEveryTicks == 0)) {
 			this->requestMissionList();
 		}
@@ -239,7 +228,6 @@ void MavlinkLink::sendHeartbeat()
 	this->sendToPx4(msg);
 }
 
-
 void MavlinkLink::requestMessageInterval(uint32_t mavlinkMsgId, float rateHz)
 {
 	if (!this->_haveTarget) {
@@ -248,7 +236,7 @@ void MavlinkLink::requestMessageInterval(uint32_t mavlinkMsgId, float rateHz)
 
 	mavlink_message_t msg;
 	mavlink_msg_command_long_pack(
-		/*system_id=*/255, /*component_id=*/1, &msg,
+		/*system_id=*/255, /*component_id=*/MAV_COMP_ID_ONBOARD_COMPUTER, &msg,
 		this->_targetSysId, this->_targetCompId,
 		MAV_CMD_SET_MESSAGE_INTERVAL, 0,
 		static_cast<float>(mavlinkMsgId),
@@ -264,12 +252,6 @@ void MavlinkLink::requestMissionList()
 		return;  // wait for first heartbeat before addressing PX4 directly
 	}
 
-	// Deliberately not touching _missionItems / _missionDownloadInProgress
-	// here: we don't know yet whether PX4's mission has actually changed.
-	// handleMissionCount() decides that once the reply's opaque_id comes
-	// back, and only resets/rebuilds _missionItems if a real download is
-	// needed -- otherwise we'd throw away a perfectly good cache on every
-	// periodic re-poll.
 	mavlink_message_t msg;
 	mavlink_msg_mission_request_list_pack(
 		/*system_id=*/255, /*component_id=*/MAV_COMP_ID_ONBOARD_COMPUTER, &msg,
@@ -281,6 +263,10 @@ void MavlinkLink::requestMissionList()
 
 void MavlinkLink::requestMissionItem(uint16_t seq)
 {
+	if (!this->_haveTarget) {
+		return;  // wait for first heartbeat before addressing PX4 directly
+	}
+
 	mavlink_message_t msg;
 	mavlink_msg_mission_request_int_pack(
 		/*system_id=*/255, /*component_id=*/MAV_COMP_ID_ONBOARD_COMPUTER, &msg,
@@ -309,11 +295,6 @@ void MavlinkLink::handleMissionCount(const mavlink_mission_count_t &countMsg)
 	{
 		std::lock_guard<std::mutex> lock(this->_missionMutex);
 
-		// Mission-cache short-circuit: if PX4 reports the same opaque_id as
-		// the mission we already have cached, nothing has changed since our
-		// last full download -- skip MISSION_REQUEST_INT/MISSION_ITEM_INT
-		// entirely. opaque_id == 0 is treated as "unset" per the mission
-		// protocol, so never cache-hit on it.
 		if (this->_haveCachedMission && countMsg.opaque_id != 0
 		    && countMsg.opaque_id == this->_cachedMissionOpaqueId
 		    && countMsg.count == this->_missionItems.size()) {
@@ -329,11 +310,6 @@ void MavlinkLink::handleMissionCount(const mavlink_mission_count_t &countMsg)
 	}
 
 	if (cacheHit) {
-		// Still ack -- PX4's mission protocol state machine expects the
-		// transaction to be closed out -- but the mission hasn't changed,
-		// so there's nothing new for the consumer to do with it. Whoever
-		// handled the previous MissionListCb invocation already has this
-		// data; re-delivering it would just be redundant work/log spam.
 		this->sendMissionAck(MAV_MISSION_ACCEPTED);
 		return;
 	}
@@ -342,8 +318,6 @@ void MavlinkLink::handleMissionCount(const mavlink_mission_count_t &countMsg)
 		this->requestMissionItem(0);
 
 	} else {
-		// Empty mission on PX4: nothing to download, still notify with an
-		// empty list so callers don't get stuck waiting on stale data.
 		this->sendMissionAck(MAV_MISSION_ACCEPTED);
 		{
 			std::lock_guard<std::mutex> lock(this->_missionMutex);
