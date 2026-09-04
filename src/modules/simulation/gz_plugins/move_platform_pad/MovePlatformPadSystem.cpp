@@ -17,6 +17,7 @@
 #include <gz/sim/components/ParentEntity.hh>
 #include <gz/sim/components/Geometry.hh>
 #include <gz/sim/components/Pose.hh>
+#include <gz/sim/components/Model.hh>
 #include <gz/common/Console.hh>
 
 #include <sdf/Box.hh>
@@ -48,8 +49,10 @@ bool isRotaryWingState(uint8_t vtolState)
 gz::sim::Entity resolveEntityByName(gz::sim::EntityComponentManager &ecm, const std::string &name)
 {
 	gz::sim::Entity found{gz::sim::kNullEntity};
-	ecm.Each<gz::sim::components::Name>(
-	[&](const gz::sim::Entity & e, const gz::sim::components::Name * nameComp) -> bool {
+	ecm.Each<gz::sim::components::Name, gz::sim::components::Model>(
+	[&](const gz::sim::Entity &e,
+	    const gz::sim::components::Name *nameComp,
+	    const gz::sim::components::Model *) -> bool {
 		if (nameComp->Data().find(name) != std::string::npos)
 		{
 			found = e;
@@ -310,7 +313,13 @@ void MovePlatformPadSystem::configureEntities(gz::sim::EntityComponentManager &e
 	}
 
 	if (!boxFound) {
-		gzerr << "Platform collision box has not been found" << std::endl;
+		static auto last_log_time = std::chrono::steady_clock::now();
+		auto now = std::chrono::steady_clock::now();
+
+		if (std::chrono::duration_cast<std::chrono::seconds>(now - last_log_time).count() >= 1) {
+			gzerr << "Platform collision box has not been found" << std::endl;
+			last_log_time = now;
+		}
 		return;
 	}
 
