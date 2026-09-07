@@ -50,9 +50,9 @@ gz::sim::Entity resolveEntityByName(gz::sim::EntityComponentManager &ecm, const 
 {
 	gz::sim::Entity found{gz::sim::kNullEntity};
 	ecm.Each<gz::sim::components::Name, gz::sim::components::Model>(
-	[&](const gz::sim::Entity &e,
-	    const gz::sim::components::Name *nameComp,
-	    const gz::sim::components::Model *) -> bool {
+		[&](const gz::sim::Entity & e,
+		    const gz::sim::components::Name * nameComp,
+	const gz::sim::components::Model *) -> bool {
 		if (nameComp->Data().find(name) != std::string::npos)
 		{
 			found = e;
@@ -320,6 +320,7 @@ void MovePlatformPadSystem::configureEntities(gz::sim::EntityComponentManager &e
 			gzerr << "Platform collision box has not been found" << std::endl;
 			last_log_time = now;
 		}
+
 		return;
 	}
 
@@ -381,7 +382,8 @@ void MovePlatformPadSystem::prepareForLanding() const
 
 	gzmsg << "Prepare for landing" << this->droneMode << std::endl;
 	// Depending on the autoMode, select the altitude.
-	double zAltitude = 0.0;
+	float zAltitude = 0.0;
+	static constexpr float kHeightPlatformBelowDroneM = 40.0;
 
 	if (this->droneMode == "AUTO.MISSION") {
 		gzmsg << "Normal mission. Drone mode is " << this->droneMode << std::endl;
@@ -389,19 +391,20 @@ void MovePlatformPadSystem::prepareForLanding() const
 
 	} else if (this->droneMode == "AUTO.RTL") {
 		gzmsg << "Straight to Rally Point. Drone mode is " << this->droneMode << std::endl;
-		zAltitude = !std::isnan(this->rallyPointAlt) ? this->rallyPointAlt : this->gazeboDronePosZ - 40.0;
+		zAltitude = !std::isnan(this->rallyPointAlt) ? this->rallyPointAlt : this->gazeboDronePosZ - kHeightPlatformBelowDroneM;
 
 	} else {
-		gzmsg << "Emergency landing or else. Moving the platform 40 m under the drone. Drone mode is : " << this->droneMode << std::endl;
-		zAltitude = this->gazeboDronePosZ - 40.0;  // -40.0m so to the drone has time to switch to MC
+		gzmsg << "Emergency landing or else. Moving the platform" << kHeightPlatformBelowDroneM << "m under the drone. Drone mode is : " <<
+		      this->droneMode << std::endl;
+		zAltitude = this->gazeboDronePosZ - kHeightPlatformBelowDroneM;  // -40.0m so to the drone has time to switch to MC
 	}
 
 	gzmsg << "Drone pose is x = " << gazeboDronePosX << ", y = " << gazeboDronePosY
 	      << ", z = " << gazeboDronePosZ << ". Landing altitude is z = " << zAltitude << std::endl;
 
-	if (this->gazeboDronePosZ - zAltitude < 0.5) { // the height of the drone is below 0.5m
-		gzerr << "Drone is already below land pose. Moving the platform 40 m under the drone." << std::endl;
-		zAltitude = this->gazeboDronePosZ - 40.0;
+	if (this->gazeboDronePosZ - zAltitude < 0.5) { // the height of the drone is below 0.5m //TODO
+		gzerr << "Drone is already below land pose. Moving the platform under the drone." << std::endl;
+		zAltitude = this->gazeboDronePosZ - kHeightPlatformBelowDroneM;
 	}
 
 	this->movePlatformPad(this->gazeboDronePosX, this->gazeboDronePosY, zAltitude);
@@ -410,8 +413,8 @@ void MovePlatformPadSystem::prepareForLanding() const
 bool MovePlatformPadSystem::isPlatformBelow(const double x, const double y) const
 {
 	// Check if there is a platform below the drone to not move higher a platform, mainly if there is a emergency landing above takeoff position.
-	return (std::abs(this->gazeboPlatformX - x) <= PlatformLengthM / 2) &&
-	       (std::abs(this->gazeboPlatformY - y) <= PlatformWidthM / 2) &&
+	return (std::abs(this->gazeboPlatformX - x) <= PlatformLengthM  * 0.5) &&
+	       (std::abs(this->gazeboPlatformY - y) <= PlatformWidthM * 0.5) &&
 	       (this->gazeboPlatformZ + PlatformHeightM / 2 <= this->gazeboDronePosZ);
 }
 
