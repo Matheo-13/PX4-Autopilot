@@ -97,6 +97,7 @@ private:
 		float baseline_length{0.f};  // of the antenna baseline the heading is measured along (m)
 		float heading_offset{0.f};   // yaw of the baseline in the body frame (rad)
 		bool heading_enabled{false}; // SENS_GNSSn_HDG isn't Disabled
+		bool two_receivers{false};   // SENS_GNSSn_HDG is Two receivers
 	};
 
 	// SENS_GNSSn_* slot for a receiver, by device_id or (when no IDs are configured) by sensor_gnss instance
@@ -121,6 +122,10 @@ private:
 	};
 
 	void UpdateGnssHeading();
+
+	// heading from the positions of two receivers (SENS_GNSSn_HDG Two receivers)
+	void storeGnssData(int instance, const sensor_gnss_s &gnss_data);
+	void UpdateTwoReceiverHeading();
 	void handleHeadingSample(const HeadingSample &sample, const GpsParamSlot *slot);
 
 	// sensor_gnss instance publishing this device_id, or -1, with its latest sample in gnss_data (zeroed when not found)
@@ -161,6 +166,8 @@ private:
 
 	bool _heading_unconfigured_reported{false};
 	bool _heading_no_baseline_reported{false};
+
+	sensor_gnss_s _gnss_data[GPS_MAX_RECEIVERS] {};
 #endif // CONFIG_SENSORS_VEHICLE_GNSS_HEADING
 
 	perf_counter_t _cycle_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
