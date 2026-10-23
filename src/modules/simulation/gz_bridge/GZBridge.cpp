@@ -939,7 +939,7 @@ void GZBridge::laserScantoLidarSensorCallback(const gz::msgs::LaserScan &msg)
 			static_cast<float>(q_sensor.Y()),
 			static_cast<float>(q_sensor.Z())
 		};
-		_px4_rangefinder.update(hrt_absolute_time(), distance, -1, q, 4);
+		_px4_rangefinder.update(hrt_absolute_time(), distance, -1, 0, q, 4);
 	}
 }
 
