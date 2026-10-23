@@ -18,7 +18,7 @@ parameters:
       description:
         short: Min signal strength for V3HP
       type: int32
-      default: 35
+      default: 70
       reboot_required: true
       min: 0
       max: 255
