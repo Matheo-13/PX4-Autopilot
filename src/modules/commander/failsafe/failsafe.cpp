@@ -421,6 +421,30 @@ FailsafeBase::ActionOptions Failsafe::fromGnssLossActParam(int param_value)
 	return options;
 }
 
+FailsafeBase::ActionOptions Failsafe::fromEscOverTemperatureActParam(int param_value)
+{
+	ActionOptions options{};
+
+	switch (esc_over_temperature_failsafe_mode(param_value)) {
+	case esc_over_temperature_failsafe_mode::Warning:
+	default:
+		options.action = Action::Warn;
+		break;
+
+	case esc_over_temperature_failsafe_mode::Return_mode:
+		options.action = Action::RTL;
+		options.clear_condition = ClearCondition::OnModeChangeOrDisarm;
+		break;
+
+	case esc_over_temperature_failsafe_mode::Land_mode:
+		options.action = Action::Land;
+		options.clear_condition = ClearCondition::OnModeChangeOrDisarm;
+		break;
+	}
+
+	return options;
+}
+
 FailsafeBase::ActionOptions Failsafe::fromParachuteActParam(int param_value)
 {
 	ActionOptions options{};
@@ -744,6 +768,8 @@ void Failsafe::checkStateAndMode(const hrt_abstime &time_us, const State &state,
 
 	CHECK_FAILSAFE(status_flags, fd_imbalanced_prop, Action::Warn);
 	CHECK_FAILSAFE(status_flags, fd_motor_failure, fromActuatorFailureActParam(_param_com_actuator_failure_act.get()));
+	CHECK_FAILSAFE(status_flags, esc_overheated,
+		       fromEscOverTemperatureActParam(_param_com_esc_temp_act.get()));
 	CHECK_FAILSAFE(status_flags, gnss_lost, fromGnssLossActParam(_param_com_gnssloss_act.get()));
 
 

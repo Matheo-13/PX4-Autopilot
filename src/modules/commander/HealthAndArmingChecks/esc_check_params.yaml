@@ -91,3 +91,14 @@ parameters:
       unit: celcius
       decimal: 1
       increment: 1
+    ESC_TEMP_CRIT_TH:
+      description:
+        short: ESC critical temperature threshold
+        long: Triggers the failsafe set by COM_ESC_TEMP_ACT and blocks arming when any ESC stays above this temperature for 1 second. Clears 5 degrees below the threshold. Set to -1 to disable.
+      type: float
+      default: -1
+      min: -1
+      max: 150
+      unit: celcius
+      decimal: 1
+      increment: 1

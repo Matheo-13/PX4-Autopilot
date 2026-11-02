@@ -177,6 +177,12 @@ private:
 		Block_arming = 4,
 	};
 
+	enum class esc_over_temperature_failsafe_mode : int32_t {
+		Warning = 0,
+		Return_mode = 1,
+		Land_mode = 2,
+	};
+
 	static ActionOptions fromNavDllOrRclActParam(int param_value);
 
 	static ActionOptions fromGfActParam(int param_value);
@@ -191,6 +197,7 @@ private:
 	static ActionOptions fromParachuteActParam(int param_value);
 	static ActionOptions fromTrafficAvoidanceActParam(int param_value);
 	static ActionOptions fromGnssLossActParam(int param_value);
+	static ActionOptions fromEscOverTemperatureActParam(int param_value);
 
 	static bool isFailsafeIgnored(uint8_t user_intended_mode, int32_t exception_mask_parameter);
 
@@ -245,7 +252,8 @@ private:
 					(ParamInt<px4::params::COM_ARM_ODID>) _param_com_arm_odid,
 					(ParamInt<px4::params::COM_PARACHUTE>) _param_com_parachute,
 					(ParamInt<px4::params::COM_TRAFF_AVOID>) _param_com_traff_avoid,
-					(ParamInt<px4::params::COM_GNSSLOSS_ACT>) _param_com_gnssloss_act
+					(ParamInt<px4::params::COM_GNSSLOSS_ACT>) _param_com_gnssloss_act,
+					(ParamInt<px4::params::COM_ESC_TEMP_ACT>) _param_com_esc_temp_act
 				       );
 
 };

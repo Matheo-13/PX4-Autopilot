@@ -67,6 +67,11 @@ public:
 	static constexpr float ESC_SPINUP_GRACE_FRACTION = 0.5f;
 	static constexpr float ESC_SPINUP_DECISION_FRACTION = 0.8f;
 
+	// An ESC must stay above ESC_TEMP_CRIT_TH this long before the failsafe triggers, to reject telemetry spikes
+	static constexpr hrt_abstime ESC_OVER_TEMP_TRIGGER_TIME_US = 1_s;
+	// The failsafe clears once all ESCs are this far below ESC_TEMP_CRIT_TH
+	static constexpr float ESC_OVER_TEMP_CLEAR_MARGIN = 5.f;
+
 	/**
 	 * Motors that are commanded to run but report no RPM or a stuck fault.
 	 * Motors with a non-finite command (stopped) are never included.
@@ -81,6 +86,7 @@ private:
 	uint16_t checkMotorStatus(const Context &context, Report &reporter, const esc_status_s &esc_status);
 	void updateEscsStatus(const Context &context, Report &reporter, const esc_status_s &esc_status, hrt_abstime now);
 	void checkEscTemperature(Report &reporter, const esc_status_s &esc_status);
+	bool checkEscCriticalTemperature(Report &reporter, const esc_status_s &esc_status, hrt_abstime now);
 
 	uORB::Subscription _esc_status_sub{ORB_ID(esc_status)};
 	uORB::Subscription _actuator_motors_sub{ORB_ID(actuator_motors)};
@@ -91,6 +97,7 @@ private:
 	bool _esc_has_reported_current[esc_status_s::CONNECTED_ESC_MAX] {}; // true if ESC reported non-zero current before (some never report any)
 	bool _esc_over_temp_warned{false};
 	systemlib::Hysteresis _esc_arm_hysteresis;
+	systemlib::Hysteresis _esc_over_temp_hysteresis;
 	uint16_t _motor_stuck_seen_ok_mask{0}; ///< motors seen spinning since the spin-up check window opened
 	MotorFailureDetector _motor_failure_detector;
 
@@ -104,5 +111,6 @@ private:
 					(ParamFloat<px4::params::MOTFAIL_OVR_TIME>) _param_motfail_ovr_time,
 					(ParamFloat<px4::params::MOTFAIL_UNDER>) _param_motfail_under,
 					(ParamFloat<px4::params::MOTFAIL_UND_TIME>) _param_motfail_und_time,
-					(ParamFloat<px4::params::ESC_TEMP_WARN_TH>) _param_esc_temp_warn_th);
+					(ParamFloat<px4::params::ESC_TEMP_WARN_TH>) _param_esc_temp_warn_th,
+					(ParamFloat<px4::params::ESC_TEMP_CRIT_TH>) _param_esc_temp_crit_th);
 };

@@ -135,6 +135,16 @@ parameters:
         3: Terminate
         4: Warning, block arming
       default: 0
+    COM_ESC_TEMP_ACT:
+      description:
+        short: ESC critical temperature failsafe action
+        long: Only used when ESC_TEMP_CRIT_TH is enabled.
+      type: enum
+      values:
+        0: Warning
+        1: Return
+        2: Land
+      default: 2
     COM_ARM_SWISBTN:
       description:
         short: Arm switch is a momentary button

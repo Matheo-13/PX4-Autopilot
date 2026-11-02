@@ -376,6 +376,26 @@ The relevant parameters are listed in the table below.
 | <a id="COM_WIND_MAX_ACT"></a>[COM_WIND_MAX_ACT](../advanced_config/parameter_reference.md#COM_WIND_MAX_ACT) | High wind failsafe action (following [COM_WIND_MAX](#COM_WIND_MAX) trigger). Can be set to: `0`: None (Default), `1`: [Warning](#act_warn), `2`: [Hold](#act_hold), `3`: [Return](#act_return), `4`: [Terminate](#act_term), `5`: [Land](#act_land). |
 | <a id="COM_WIND_WARN"></a>[COM_WIND_WARN](../advanced_config/parameter_reference.md#COM_WIND_WARN)          | Wind speed threshold that triggers periodic failsafe warning.                                                                                                                                                                                        |
 
+## ESC Temperature Failsafe
+
+<Badge type="tip" text="main (PX4 v2.0)" />
+
+The ESC temperature failsafe warns and can trigger a failsafe action when an ESC overheats.
+It needs ESCs that report their temperature in telemetry (for example DShot with telemetry, or DroneCAN ESCs).
+
+There are two thresholds:
+
+- Above the warning threshold, the pilot is warned to reduce throttle.
+  Arming is not blocked.
+- When any ESC stays above the critical threshold for 1 second, the failsafe action is triggered and arming is blocked.
+  The failsafe clears once every ESC has cooled 5 °C below the critical threshold.
+
+| Parameter                                                                                                   | Description                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <a id="ESC_TEMP_WARN_TH"></a>[ESC_TEMP_WARN_TH](../advanced_config/parameter_reference.md#ESC_TEMP_WARN_TH) | ESC temperature warning threshold (°C). Set to -1 to disable.                                                                                     |
+| <a id="ESC_TEMP_CRIT_TH"></a>[ESC_TEMP_CRIT_TH](../advanced_config/parameter_reference.md#ESC_TEMP_CRIT_TH) | ESC critical temperature threshold (°C) that triggers [COM_ESC_TEMP_ACT](#COM_ESC_TEMP_ACT). Set to -1 to disable (default).                      |
+| <a id="COM_ESC_TEMP_ACT"></a>[COM_ESC_TEMP_ACT](../advanced_config/parameter_reference.md#COM_ESC_TEMP_ACT) | ESC critical temperature failsafe action. Can be set to: `0`: [Warning](#act_warn), `1`: [Return](#act_return), `2`: [Land](#act_land) (default). |
+
 ## Failure Detector
 
 The failure detector allows a vehicle to take protective actions if it unexpectedly flips, detects a motor failure, or if it is notified by an external failure detection system.

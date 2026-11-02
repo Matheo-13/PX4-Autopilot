@@ -75,6 +75,30 @@ public:
 		param_reset(param_find("FD_ACT_EN"));
 		param_reset(param_find("COM_SPOOLUP_TIME"));
 		param_reset(param_find("MOTFAIL_UND_TIME"));
+		param_reset(param_find("ESC_TEMP_CRIT_TH"));
+	}
+
+	// Publish a quad ESC status, all ESCs fresh, online and armed, with the given ESC temperatures
+	void publishTemperatures(std::array<float, 4> temperatures)
+	{
+		esc_status_s esc_status{};
+		esc_status.timestamp = hrt_absolute_time();
+		esc_status.esc_count = 4;
+		esc_status.esc_online_flags = 0b1111;
+		esc_status.esc_armed_flags = 0b1111;
+
+		for (int i = 0; i < 4; i++) {
+			esc_status.esc[i].timestamp = esc_status.timestamp;
+			esc_status.esc[i].actuator_function = esc_report_s::ACTUATOR_FUNCTION_MOTOR1 + i;
+			esc_status.esc[i].esc_temperature = temperatures[i];
+		}
+
+		_esc_status_pub.publish(esc_status);
+	}
+
+	void setCriticalTemperature(float temperature)
+	{
+		param_set_no_notification(param_find("ESC_TEMP_CRIT_TH"), &temperature);
 	}
 
 	// Publish a quad ESC status with every ESC fresh except `stale_index` whose last report is `age` old
@@ -271,6 +295,73 @@ TEST_F(EscChecksTest, EscOfflineIgnoredWithChecksDisabled)
 	EXPECT_FALSE(_health_error_escs);
 	EXPECT_EQ(_check.getMotorFailureMask(), 0u);
 	EXPECT_FALSE(_failsafe_flags.fd_motor_failure);
+}
+
+// An ESC above ESC_TEMP_CRIT_TH only triggers the failsafe and blocks arming once the trigger time passed
+TEST_F(EscChecksTest, EscCriticalTemperatureTriggersAfterTriggerTime)
+{
+	setCriticalTemperature(100.f);
+	publishTemperatures({60.f, 105.f, 60.f, 60.f});
+	runCheck();
+	EXPECT_FALSE(_failsafe_flags.esc_overheated);
+	EXPECT_TRUE(_can_arm);
+
+	px4_usleep(EscChecks::ESC_OVER_TEMP_TRIGGER_TIME_US + 50_ms);
+	publishTemperatures({60.f, 105.f, 60.f, 60.f});
+	runCheck();
+	EXPECT_TRUE(_failsafe_flags.esc_overheated);
+	EXPECT_FALSE(_can_arm);
+	EXPECT_TRUE(_health_error_escs);
+}
+
+// A temperature spike shorter than the trigger time does not trigger the failsafe
+TEST_F(EscChecksTest, EscCriticalTemperatureSpikeIgnored)
+{
+	setCriticalTemperature(100.f);
+	publishTemperatures({60.f, 105.f, 60.f, 60.f});
+	runCheck();
+	px4_usleep(EscChecks::ESC_OVER_TEMP_TRIGGER_TIME_US / 2);
+	publishTemperatures({60.f, 99.f, 60.f, 60.f});
+	runCheck();
+	px4_usleep(EscChecks::ESC_OVER_TEMP_TRIGGER_TIME_US / 2 + 50_ms);
+	publishTemperatures({60.f, 105.f, 60.f, 60.f});
+	runCheck();
+	EXPECT_FALSE(_failsafe_flags.esc_overheated);
+	EXPECT_TRUE(_can_arm);
+}
+
+// Once triggered, the failsafe holds until every ESC cooled ESC_OVER_TEMP_CLEAR_MARGIN below ESC_TEMP_CRIT_TH
+TEST_F(EscChecksTest, EscCriticalTemperatureClearsBelowMargin)
+{
+	setCriticalTemperature(100.f);
+	publishTemperatures({60.f, 105.f, 60.f, 60.f});
+	runCheck();
+	px4_usleep(EscChecks::ESC_OVER_TEMP_TRIGGER_TIME_US + 50_ms);
+	publishTemperatures({60.f, 105.f, 60.f, 60.f});
+	runCheck();
+	ASSERT_TRUE(_failsafe_flags.esc_overheated);
+
+	publishTemperatures({60.f, 100.f - EscChecks::ESC_OVER_TEMP_CLEAR_MARGIN + 1.f, 60.f, 60.f});
+	runCheck();
+	EXPECT_TRUE(_failsafe_flags.esc_overheated);
+	EXPECT_FALSE(_can_arm);
+
+	publishTemperatures({60.f, 100.f - EscChecks::ESC_OVER_TEMP_CLEAR_MARGIN - 1.f, 60.f, 60.f});
+	runCheck();
+	EXPECT_FALSE(_failsafe_flags.esc_overheated);
+	EXPECT_TRUE(_can_arm);
+}
+
+// ESC_TEMP_CRIT_TH is disabled by default
+TEST_F(EscChecksTest, EscCriticalTemperatureDisabledByDefault)
+{
+	publishTemperatures({60.f, 140.f, 60.f, 60.f});
+	runCheck();
+	px4_usleep(EscChecks::ESC_OVER_TEMP_TRIGGER_TIME_US + 50_ms);
+	publishTemperatures({60.f, 140.f, 60.f, 60.f});
+	runCheck();
+	EXPECT_FALSE(_failsafe_flags.esc_overheated);
+	EXPECT_TRUE(_can_arm);
 }
 
 static const std::array<float, 4> kIdle{0.f, 0.f, 0.f, 0.f};

@@ -74,6 +74,7 @@ void EscChecks::checkAndReport(const Context &context, Report &reporter)
 	esc_status_s esc_status;
 
 	reporter.failsafeFlags().fd_motor_stuck_failure = false;
+	reporter.failsafeFlags().esc_overheated = false;
 
 	// Run motor status checks even when no new ESC data arrives (to detect timeouts)
 	if (_esc_status_sub.copy(&esc_status)) {
@@ -99,6 +100,13 @@ void EscChecks::checkAndReport(const Context &context, Report &reporter)
 
 		if (_param_esc_temp_warn_th.get() >= FLT_EPSILON) {
 			checkEscTemperature(reporter, esc_status);
+		}
+
+		if (_param_esc_temp_crit_th.get() >= FLT_EPSILON) {
+			reporter.failsafeFlags().esc_overheated = checkEscCriticalTemperature(reporter, esc_status, now);
+
+		} else {
+			_esc_over_temp_hysteresis.set_state_and_update(false, now);
 		}
 
 		_motor_failure_mask = mask;
@@ -366,6 +374,72 @@ void EscChecks::checkEscTemperature(Report &reporter, const esc_status_s &esc_st
 	} else if (max_temperature < warn_temp - 5.f) {
 		_esc_over_temp_warned = false;
 	}
+}
+
+bool EscChecks::checkEscCriticalTemperature(Report &reporter, const esc_status_s &esc_status, hrt_abstime now)
+{
+	const float crit_temp = _param_esc_temp_crit_th.get();
+	const float clear_temp = crit_temp - ESC_OVER_TEMP_CLEAR_MARGIN;
+
+	bool any_over_crit = false;
+	uint16_t not_cleared_mask = 0; // ESCs not yet cooled below the clear temperature
+
+	for (uint8_t esc_index = 0; esc_index < esc_status_s::CONNECTED_ESC_MAX; esc_index++) {
+		if (!math::isInRange(esc_status.esc[esc_index].actuator_function,
+				     esc_report_s::ACTUATOR_FUNCTION_MOTOR1, esc_report_s::ACTUATOR_FUNCTION_MOTOR_MAX)) {
+			continue;
+		}
+
+		const float temperature = esc_status.esc[esc_index].esc_temperature;
+
+		if (!PX4_ISFINITE(temperature)) {
+			continue;
+		}
+
+		any_over_crit |= temperature > crit_temp;
+
+		if (temperature >= clear_temp) {
+			not_cleared_mask |= (1u << esc_index);
+		}
+	}
+
+	// Trigger above the critical temperature after the trigger time, stay triggered until cooled below the clear temperature
+	const bool over_temp = any_over_crit || (_esc_over_temp_hysteresis.get_state() && not_cleared_mask != 0);
+	_esc_over_temp_hysteresis.set_hysteresis_time_from(false, ESC_OVER_TEMP_TRIGGER_TIME_US);
+	_esc_over_temp_hysteresis.set_state_and_update(over_temp, now);
+
+	if (!_esc_over_temp_hysteresis.get_state()) {
+		return false;
+	}
+
+	for (uint8_t esc_index = 0; esc_index < esc_status_s::CONNECTED_ESC_MAX; esc_index++) {
+		if (!(not_cleared_mask & (1u << esc_index))) {
+			continue;
+		}
+
+		const float temperature = esc_status.esc[esc_index].esc_temperature;
+
+		/* EVENT
+		 * @description
+		 * The failsafe action is set by <param>COM_ESC_TEMP_ACT</param>.
+		 *
+		 * <profile name="dev">
+		 * Configured by <param>ESC_TEMP_CRIT_TH</param>
+		 * </profile>
+		 */
+		reporter.healthFailure<uint8_t, uint8_t>(NavModes::All, health_component_t::motors_escs,
+				events::ID("check_esc_critical_temperature"),
+				events::Log::Critical,
+				"ESC {1} critical temperature, {2:C}",
+				static_cast<uint8_t>(esc_index + 1), static_cast<uint8_t>(temperature));
+
+		if (reporter.mavlink_log_pub()) {
+			mavlink_log_critical(reporter.mavlink_log_pub(), "ESC %d critical temperature: %.0f C\t", esc_index + 1,
+					     (double)temperature);
+		}
+	}
+
+	return true;
 }
 
 uint16_t EscChecks::checkMotorStatus(const Context &context, Report &reporter, const esc_status_s &esc_status)
